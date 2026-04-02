@@ -222,7 +222,7 @@ These three unlock the most valuable economic and satellite data. Each takes abo
 
 ### LLM Provider (optional, for AI-enhanced ideas)
 
-Set `LLM_PROVIDER` to one of: `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, `grok`
+Set `LLM_PROVIDER` to one of: `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, `grok`, `perplexity`
 
 | Provider | Key Required | Default Model |
 |----------|-------------|---------------|
@@ -234,6 +234,7 @@ Set `LLM_PROVIDER` to one of: `anthropic`, `openai`, `gemini`, `codex`, `openrou
 | `minimax` | `LLM_API_KEY` | MiniMax-M2.5 |
 | `mistral` | `LLM_API_KEY` | mistral-large-latest |
 | `grok` | `LLM_API_KEY` | grok-4-latest |
+| `perplexity` | `LLM_API_KEY` | sonar-pro |
 
 For Codex, run `npx @openai/codex login` to authenticate via your ChatGPT subscription.
 
@@ -310,6 +311,7 @@ crucix/
 │   │   ├── gemini.mjs         # Gemini
 │   │   ├── grok.mjs           # Grok
 │   │   ├── openrouter.mjs     # OpenRouter (Unified API)
+│   │   ├── perplexity.mjs     # Perplexity Sonar
 │   │   ├── codex.mjs          # Codex (ChatGPT subscription)
 │   │   ├── minimax.mjs        # MiniMax (M2.5, 204K context)
 │   │   ├── mistral.mjs        # Mistral AI
@@ -414,7 +416,7 @@ All settings are in `.env` with sensible defaults:
 |----------|---------|-------------|
 | `PORT` | `3117` | Dashboard server port |
 | `REFRESH_INTERVAL_MINUTES` | `15` | Auto-refresh interval |
-| `LLM_PROVIDER` | disabled | `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, or `grok` |
+| `LLM_PROVIDER` | disabled | `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, `grok`, or `perplexity` |
 | `LLM_API_KEY` | — | API key (not needed for codex) |
 | `LLM_MODEL` | per-provider default | Override model selection |
 | `TELEGRAM_BOT_TOKEN` | disabled | For Telegram alerts + bot commands |

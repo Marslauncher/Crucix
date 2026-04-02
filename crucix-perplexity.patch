@@ -1,0 +1,307 @@
+--- a/lib/llm/perplexity.mjs
++++ b/lib/llm/perplexity.mjs
+@@ -0,0 +1,55 @@
++// Perplexity Provider - raw fetch, OpenAI-compatible chat completions
++
++import { LLMProvider } from './provider.mjs';
++
++export class PerplexityProvider extends LLMProvider {
++  constructor(config) {
++    super(config);
++    this.name = 'perplexity';
++    this.apiKey = config.apiKey;
++    this.model = config.model || 'sonar-pro';
++    this.baseUrl = (config.baseUrl || 'https://api.perplexity.ai').replace(/\/$/, '');
++  }
++
++  get isConfigured() {
++    return !!this.apiKey;
++  }
++
++  async complete(systemPrompt, userMessage, opts = {}) {
++    const res = await fetch(`${this.baseUrl}/chat/completions`, {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++        Authorization: `Bearer ${this.apiKey}`,
++      },
++      body: JSON.stringify({
++        model: this.model,
++        max_tokens: opts.maxTokens || 4096,
++        messages: [
++          { role: 'system', content: systemPrompt },
++          { role: 'user', content: userMessage },
++        ],
++        stream: false,
++        temperature: 0,
++      }),
++      signal: AbortSignal.timeout(opts.timeout || 60000),
++    });
++
++    if (!res.ok) {
++      const err = await res.text().catch(() => '');
++      throw new Error(`Perplexity API ${res.status}: ${err.substring(0, 200)}`);
++    }
++
++    const data = await res.json();
++    const text = data.choices?.[0]?.message?.content || '';
++
++    return {
++      text,
++      usage: {
++        inputTokens: data.usage?.prompt_tokens || 0,
++        outputTokens: data.usage?.completion_tokens || 0,
++      },
++      model: data.model || this.model,
++    };
++  }
++}
+--- a/lib/llm/index.mjs
++++ b/lib/llm/index.mjs
+@@ -9,6 +9,7 @@
+ import { MistralProvider } from "./mistral.mjs";
+ import { OllamaProvider } from "./ollama.mjs";
+ import { GrokProvider } from "./grok.mjs";
++import { PerplexityProvider } from "./perplexity.mjs";
+ 
+ export { LLMProvider } from "./provider.mjs";
+ export { AnthropicProvider } from "./anthropic.mjs";
+@@ -20,6 +21,7 @@
+ export { MistralProvider } from "./mistral.mjs";
+ export { OllamaProvider } from "./ollama.mjs";
+ export { GrokProvider } from "./grok.mjs";
++export { PerplexityProvider } from "./perplexity.mjs";
+ 
+ /**
+  * Create an LLM provider based on config.
+@@ -50,6 +52,8 @@
+       return new OllamaProvider({ model, baseUrl: llmConfig.baseUrl });
+     case 'grok':
+       return new GrokProvider({ apiKey, model });
++    case 'perplexity':
++      return new PerplexityProvider({ apiKey, model, baseUrl: llmConfig.baseUrl });
+     default:
+       console.warn(
+         `[LLM] Unknown provider "${provider}". LLM features disabled.`,
+--- a/crucix.config.mjs
++++ b/crucix.config.mjs
+@@ -7,10 +7,10 @@
+   refreshIntervalMinutes: parseInt(process.env.REFRESH_INTERVAL_MINUTES) || 15,
+ 
+   llm: {
+-    provider: process.env.LLM_PROVIDER || null, // anthropic | openai | gemini | codex | openrouter | minimax | mistral | ollama | grok
++    provider: process.env.LLM_PROVIDER || null, // anthropic | openai | gemini | codex | openrouter | minimax | mistral | ollama | grok | perplexity
+     apiKey: process.env.LLM_API_KEY || null,
+     model: process.env.LLM_MODEL || null,
+-    baseUrl: process.env.OLLAMA_BASE_URL || null,
++    baseUrl: process.env.LLM_BASE_URL || process.env.OLLAMA_BASE_URL || null,
+   },
+ 
+   telegram: {
+--- a/.env.example
++++ b/.env.example
+@@ -33,13 +33,15 @@
+ 
+ # === LLM Layer (optional) ===
+ # Enables AI-enhanced trade ideas and breaking news Telegram alerts.
+-# Provider options: anthropic | openai | gemini | codex | openrouter | minimax | mistral | ollama | grok
++# Provider options: anthropic | openai | gemini | codex | openrouter | minimax | mistral | ollama | grok | perplexity
+ LLM_PROVIDER=
+ # Not needed for codex (uses ~/.codex/auth.json) or ollama (local)
+ LLM_API_KEY=
+ # Optional override. Each provider has a sensible default:
+-# anthropic: claude-sonnet-4-6 | openai: gpt-5.4 | gemini: gemini-3.1-pro | codex: gpt-5.3-codex | openrouter: openrouter/auto | minimax: MiniMax-M2.5 | ollama: llama3.1:8b | grok: grok-4-latest
++# anthropic: claude-sonnet-4-6 | openai: gpt-5.4 | gemini: gemini-3.1-pro | codex: gpt-5.3-codex | openrouter: openrouter/auto | minimax: MiniMax-M2.5 | ollama: llama3.1:8b | grok: grok-4-latest | perplexity: sonar-pro
+ LLM_MODEL=
++# Generic provider base URL override (optional, mainly for OpenAI-compatible providers)
++LLM_BASE_URL=
+ # Ollama base URL (only needed if not using default http://localhost:11434)
+ OLLAMA_BASE_URL=
+ 
+--- a/README.md
++++ b/README.md
+@@ -222,7 +222,7 @@
+ 
+ ### LLM Provider (optional, for AI-enhanced ideas)
+ 
+-Set `LLM_PROVIDER` to one of: `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, `grok`
++Set `LLM_PROVIDER` to one of: `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, `grok`, `perplexity`
+ 
+ | Provider | Key Required | Default Model |
+ |----------|-------------|---------------|
+@@ -234,6 +234,7 @@
+ | `minimax` | `LLM_API_KEY` | MiniMax-M2.5 |
+ | `mistral` | `LLM_API_KEY` | mistral-large-latest |
+ | `grok` | `LLM_API_KEY` | grok-4-latest |
++| `perplexity` | `LLM_API_KEY` | sonar-pro |
+ 
+ For Codex, run `npx @openai/codex login` to authenticate via your ChatGPT subscription.
+ 
+@@ -310,6 +311,7 @@
+ │   │   ├── gemini.mjs         # Gemini
+ │   │   ├── grok.mjs           # Grok
+ │   │   ├── openrouter.mjs     # OpenRouter (Unified API)
++│   │   ├── perplexity.mjs     # Perplexity Sonar
+ │   │   ├── codex.mjs          # Codex (ChatGPT subscription)
+ │   │   ├── minimax.mjs        # MiniMax (M2.5, 204K context)
+ │   │   ├── mistral.mjs        # Mistral AI
+@@ -414,7 +416,7 @@
+ |----------|---------|-------------|
+ | `PORT` | `3117` | Dashboard server port |
+ | `REFRESH_INTERVAL_MINUTES` | `15` | Auto-refresh interval |
+-| `LLM_PROVIDER` | disabled | `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, or `grok` |
++| `LLM_PROVIDER` | disabled | `anthropic`, `openai`, `gemini`, `codex`, `openrouter`, `minimax`, `mistral`, `grok`, or `perplexity` |
+ | `LLM_API_KEY` | — | API key (not needed for codex) |
+ | `LLM_MODEL` | per-provider default | Override model selection |
+ | `TELEGRAM_BOT_TOKEN` | disabled | For Telegram alerts + bot commands |
+--- a/test/llm-perplexity.test.mjs
++++ b/test/llm-perplexity.test.mjs
+@@ -0,0 +1,124 @@
++// Perplexity provider — unit tests
++// Uses Node.js built-in test runner (node:test) — no extra dependencies
++
++import { describe, it, mock } from 'node:test';
++import assert from 'node:assert/strict';
++import { PerplexityProvider } from '../lib/llm/perplexity.mjs';
++import { createLLMProvider } from '../lib/llm/index.mjs';
++
++describe('PerplexityProvider', () => {
++  it('should set defaults correctly', () => {
++    const provider = new PerplexityProvider({ apiKey: 'pplx-test' });
++    assert.equal(provider.name, 'perplexity');
++    assert.equal(provider.model, 'sonar-pro');
++    assert.equal(provider.baseUrl, 'https://api.perplexity.ai');
++    assert.equal(provider.isConfigured, true);
++  });
++
++  it('should accept custom model and baseUrl', () => {
++    const provider = new PerplexityProvider({ apiKey: 'pplx-test', model: 'sonar', baseUrl: 'https://api.perplexity.ai/' });
++    assert.equal(provider.model, 'sonar');
++    assert.equal(provider.baseUrl, 'https://api.perplexity.ai');
++  });
++
++  it('should report not configured without API key', () => {
++    const provider = new PerplexityProvider({});
++    assert.equal(provider.isConfigured, false);
++  });
++
++  it('should throw on API error', async () => {
++    const provider = new PerplexityProvider({ apiKey: 'pplx-test' });
++    const originalFetch = globalThis.fetch;
++    globalThis.fetch = mock.fn(() => Promise.resolve({ ok: false, status: 401, text: () => Promise.resolve('Unauthorized') }));
++    try {
++      await assert.rejects(
++        () => provider.complete('system', 'user'),
++        (err) => {
++          assert.match(err.message, /Perplexity API 401/);
++          return true;
++        }
++      );
++    } finally {
++      globalThis.fetch = originalFetch;
++    }
++  });
++
++  it('should parse successful response', async () => {
++    const provider = new PerplexityProvider({ apiKey: 'pplx-test' });
++    const mockResponse = {
++      choices: [{ message: { content: 'Hello from Perplexity' } }],
++      usage: { prompt_tokens: 10, completion_tokens: 5 },
++      model: 'sonar-pro',
++    };
++    const originalFetch = globalThis.fetch;
++    globalThis.fetch = mock.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(mockResponse) }));
++    try {
++      const result = await provider.complete('system', 'user');
++      assert.equal(result.text, 'Hello from Perplexity');
++      assert.equal(result.usage.inputTokens, 10);
++      assert.equal(result.usage.outputTokens, 5);
++      assert.equal(result.model, 'sonar-pro');
++    } finally {
++      globalThis.fetch = originalFetch;
++    }
++  });
++
++  it('should send correct request format', async () => {
++    const provider = new PerplexityProvider({ apiKey: 'pplx-test-key', model: 'sonar-pro' });
++    let capturedUrl, capturedOpts;
++    const originalFetch = globalThis.fetch;
++    globalThis.fetch = mock.fn((url, opts) => {
++      capturedUrl = url;
++      capturedOpts = opts;
++      return Promise.resolve({
++        ok: true,
++        json: () => Promise.resolve({
++          choices: [{ message: { content: 'ok' } }],
++          usage: { prompt_tokens: 1, completion_tokens: 1 },
++          model: 'sonar-pro',
++        }),
++      });
++    });
++    try {
++      await provider.complete('system prompt', 'user message', { maxTokens: 2048 });
++      assert.equal(capturedUrl, 'https://api.perplexity.ai/chat/completions');
++      assert.equal(capturedOpts.method, 'POST');
++      const headers = capturedOpts.headers;
++      assert.equal(headers['Content-Type'], 'application/json');
++      assert.equal(headers.Authorization, 'Bearer pplx-test-key');
++      const body = JSON.parse(capturedOpts.body);
++      assert.equal(body.model, 'sonar-pro');
++      assert.equal(body.max_tokens, 2048);
++      assert.equal(body.stream, false);
++      assert.equal(body.temperature, 0);
++      assert.equal(body.messages[0].role, 'system');
++      assert.equal(body.messages[0].content, 'system prompt');
++      assert.equal(body.messages[1].role, 'user');
++      assert.equal(body.messages[1].content, 'user message');
++    } finally {
++      globalThis.fetch = originalFetch;
++    }
++  });
++
++  it('should handle empty response gracefully', async () => {
++    const provider = new PerplexityProvider({ apiKey: 'pplx-test' });
++    const originalFetch = globalThis.fetch;
++    globalThis.fetch = mock.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ choices: [], usage: {} }) }));
++    try {
++      const result = await provider.complete('sys', 'user');
++      assert.equal(result.text, '');
++      assert.equal(result.usage.inputTokens, 0);
++      assert.equal(result.usage.outputTokens, 0);
++    } finally {
++      globalThis.fetch = originalFetch;
++    }
++  });
++});
++
++describe('createLLMProvider', () => {
++  it('should create Perplexity provider', () => {
++    const provider = createLLMProvider({ provider: 'perplexity', apiKey: 'pplx-test' });
++    assert.ok(provider instanceof PerplexityProvider);
++    assert.equal(provider.isConfigured, true);
++  });
++});
+--- a/test/llm-perplexity-integration.test.mjs
++++ b/test/llm-perplexity-integration.test.mjs
+@@ -0,0 +1,21 @@
++// Perplexity provider — optional live integration test
++
++import { describe, it } from 'node:test';
++import assert from 'node:assert/strict';
++import { PerplexityProvider } from '../lib/llm/perplexity.mjs';
++
++const apiKey = process.env.PERPLEXITY_API_KEY || process.env.LLM_API_KEY;
++const shouldRun = !!apiKey;
++const testFn = shouldRun ? it : it.skip;
++
++describe('PerplexityProvider integration', () => {
++  testFn('should complete a simple prompt with live API', async () => {
++    const provider = new PerplexityProvider({ apiKey, model: process.env.PERPLEXITY_MODEL || 'sonar-pro' });
++    const result = await provider.complete('You are concise.', 'Reply with exactly: pong', { maxTokens: 32, timeout: 90000 });
++    assert.equal(typeof result.text, 'string');
++    assert.ok(result.text.length > 0);
++    assert.equal(typeof result.usage.inputTokens, 'number');
++    assert.equal(typeof result.usage.outputTokens, 'number');
++    assert.equal(typeof result.model, 'string');
++  });
++});
